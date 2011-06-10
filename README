@@ -1,0 +1,26 @@
+FoxMeter is an addon for Mozilla Firefox, base on HttpFox(http://code.google.com/p/httpfox/)
+
+HttpFox features:
+Information available per request includes:
+	Request and response headers
+	Sent and received cookies
+	Querystring parameters
+	POST parameters
+	Response body 
+
+Improvement:
+	summary tab for all Request
+	support Firefox 5.0
+
+Roadmap:
+	addons test warning fix(https://addons.mozilla.org/en-US/developers/upload/8d65d79128f845438d96233bd6d18036):
+	  menu item has been moved
+	  JavaScript namespace pollution
+	  Global variable overwrite
+	  javascript:/data: URIs may be incompatible with Firefox 6
+	for performance reason, improve tree to virtual tree
+	filter apply to esummary
+
+
+Get the latest version from Mozilla addons: https://addons.mozilla.org/en-US/firefox/addon/foxmeter/
+source code: https://github.com/xiaonei/foxmeter
