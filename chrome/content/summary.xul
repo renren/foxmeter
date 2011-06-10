@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="chrome://global/skin" type="text/css"?>
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+  <vbox flex="1">
+    <hbox flex="1">
+      <tree id="thelist" flex="1" style="height: 10em;"
+          hidecolumnpicker="true" seltype="single">
+        <treecols>
+          <treecol id="hostCol" label="Host" flex="2" primary="true"
+                   persist="width"
+                   onclick="sort('host');" />
+          <splitter class="tree-splitter"/>
+          <treecol id="countCol" label="Count" flex="1"
+                   persist="width" style="text-align: right;"
+                   onclick="sort('count');" />
+          <splitter class="tree-splitter"/>
+          <treecol id="timeCol" label="Average time(ms)" flex="1"
+                   persist="width" style="text-align: right;"
+                   onclick="sort('time');"/>
+          <splitter class="tree-splitter"/>
+          <treecol id="byteCol" label="Bytes" flex="1"
+                   persist="width" style="text-align: right;"
+                   onclick="sort('byte');"/>
+        </treecols>
+        <treechildren id="summaryResults"/>
+      </tree>
+      
+    </hbox>
+    <separator class="thin" />
+    <hbox align="right">
+      <button id="ok" label="Close" oncommand="close();" />
+    </hbox>
+  </vbox>
+  <script>
+      <![CDATA[
+/* parseUri JS v0.1.1, by Steven Levithan <http://stevenlevithan.com>
+    Splits any well-formed URI into the following parts (all are optional):
+    ----------------------
+    - source (since the exec method returns the entire match as key 0, we might as well use it)
+    - protocol (i.e., scheme)
+    - authority (includes both the domain and port)
+      - domain (i.e., host; can be an IP address)
+      - port
+    - path (includes both the directory path and filename)
+      - directoryPath (supports directories with periods, and without a trailing backslash)
+      - fileName
+    - query (does not include the leading question mark)
+    - anchor (i.e., fragment) */
+function parseUri(sourceUri) {
+	var uriPartNames = ["source","protocol","authority","domain","port","path","directoryPath","fileName","query","anchor"],
+		uriParts = new RegExp("^(?:([^:/?#.]+):)?(?://)?(([^:/?#]*)(?::(\\d*))?)((/(?:[^?#](?![^?#/]*\\.[^?#/.]+(?:[\\?#]|$)))*/?)?([^?#/]*))?(?:\\?([^#]*))?(?:#(.*))?").exec(sourceUri),
+		uri = {};
+	
+	for(var i = 0; i < 10; i++){
+		uri[uriPartNames[i]] = (uriParts[i] ? uriParts[i] : "");
+	}
+	
+	/* Always end directoryPath with a trailing backslash if a path was present in the source URI
+	Note that a trailing backslash is NOT automatically inserted within or appended to the "path" key */
+	if(uri.directoryPath.length > 0){
+		uri.directoryPath = uri.directoryPath.replace(/\/?$/, "/");
+	}
+	
+	return uri;
+}
+
+function objectToString(o) {
+    var parse = function (_o) {
+        var a = [], t;
+        for (var p in _o) {
+            if (_o.hasOwnProperty(p)) {
+                t = _o[p];
+                if (t && typeof t == "object") {
+                    a[a.length] = p + ":{ " + arguments.callee(t).join(", ") + "}";
+                }
+                else {
+                    if (typeof t == "string") {
+                        a[a.length] = [p + ": \"" + t.toString() + "\""];
+                    }
+                    else {
+                        a[a.length] = [p + ": " + t.toString()];
+                    }
+                }
+            }
+        }
+        return a;
+    }
+
+    return "{" + parse(o).join(", ") + "}";
+}
+
+function compareByHost(a, b) {
+  var ra = a[0].split('.').reverse();
+  var rb = b[0].split('.').reverse();
+  if (ra.length>1) ra.shift();
+  if (rb.length>1) rb.shift();
+  while (ra.length && rb.length && ra[0] == rb[0]) {
+    ra.shift();
+    rb.shift();
+  }
+  
+  if (ra.length != rb.length)
+    return ra.length - rb.length;
+  return ra[0] > rb[0];
+}
+
+function compareByCount(a, b) {
+  return Number(a[1]) < Number(b[1]);
+}
+
+function compareByTime(a, b) {
+  return Number(a[2]) < Number(b[2]);
+}
+
+function compareByByte(a, b) {
+  return Number(a[3]) < Number(b[3]);
+}
+    
+function init() {
+  var foxmeterService = Components.classes["@xiaonei.com/foxmeter;1"].getService().wrappedJSObject;
+  var from_arr = foxmeterService.Requests;
+  
+  var host_map = {}; // a.b.com => [Request]
+  for (var i = 0; i < from_arr.length; i++) {
+      var r = from_arr[i];
+      if (r.IsFromCache) continue;
+
+      var uri = parseUri(r.Url);
+      if (uri.domain in host_map) {
+          host_map[uri.domain].push(r);
+      } else
+          host_map[uri.domain] = [r];
+  }
+
+  // default sort by host
+  var sorted = []; // [host, count, time, bytes]
+  for (var host in host_map) {
+      var arr = host_map[host];
+      var time_used = 0;
+      var byte_total = 0;
+      for (var i = 0; i < arr.length; i++) {
+          if (!arr[i].IsFinished) continue;
+          time_used += (arr[i].EndTimestamp - arr[i].StartTimestamp);
+          // byte_total += arr[i].getBytesLoadedTotal();
+          byte_total += arr[i].ResponseHeadersSize + arr[i].BytesLoaded;
+      }
+      sorted.push(
+        [host, arr.length, (time_used / arr.length).toFixed(2), byte_total]);
+  }
+
+  sorted.sort(compareByHost);
+  
+  _view._arr = sorted;
+  document.getElementById('thelist').view = _view;
+}
+
+function sort(name) {
+  var ascending = (name == this._lastSortProperty) ? !this._lastSortAscending : true;
+  
+  var f = {host:compareByHost, count:compareByCount
+    ,time:compareByTime, byte:compareByByte}[name];
+  
+  _view._arr.sort(f);
+  
+   if(!ascending) _view._arr.reverse();
+   
+   var colname = name +'Col';
+   var sortOrderString = ascending ? "ascending" : "descending";
+   var col = document.getElementById(colname);
+   col.setAttribute("sortDirection", sortOrderString);
+   
+   col = document.getElementById(this._lastSortProperty + 'Col');
+   if (col)
+     col.removeAttribute("sortDirection");
+   
+   this._lastSortAscending = ascending;
+   this._lastSortProperty = name;
+}
+
+window.addEventListener("load", function(){
+  init();
+  }, false);
+
+var _view = {
+  _arr : [],
+  get rowCount() { return this._arr.length;},
+  getCellText : function(row,column){
+    return this._arr[row][column.index];
+  },
+  setTree: function(treebox){ this.treebox = treebox; },
+  isContainer: function(row){ return false; }, // TODO:
+  isSeparator: function(row){ return false; },
+  isSorted: function(){ return false; },
+  canDrop: function (aIndex, aOrientation) {return false; },
+  drop: function (aIndex, aOrientation) {},
+  getParentIndex : function(row) {
+    return -1;
+  },
+  hasNextSibling: function (aParentIndex, aIndex) {
+    return false; // TODO:
+  },
+  hasPreviousSibling: function (aIndex) { return falsel; },
+  getLevel: function(row){ return 0; },
+  getImageSrc: function(row,col){ return null; },
+  getProgressMode: function (aIndex, aColumn) {},
+  getCellValue: function (aIndex, aColumn) {},
+  getRowProperties: function(row,props){},
+  getCellProperties: function(row,col,props){},
+  getColumnProperties: function(colid,col,props){},  
+  toggleOpenState: function (aIndex) {},
+  cycleHeader: function (aColumn) {},
+  selectionChanged: function () {},
+  cycleCell: function (aIndex, aColumn) {},
+  isEditable: function (aIndex, aColumn) {
+    return false;
+  },
+  isSelectable: function (aIndex, aColumn) {
+    return false;
+  },
+  setCellValue: function (aIndex, aColumn, aValue) {},
+  setCellText: function (aIndex, aColumn, aValue) {},
+  performAction: function (aAction) {},
+  performActionOnRow: function (aAction, aIndex) {},
+  performActionOnCell: function (aAction, aindex, aColumn) {},
+};
+
+  ]]>
+</script>
+</window>
